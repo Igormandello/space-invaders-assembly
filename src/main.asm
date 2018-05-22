@@ -8,6 +8,7 @@
       include \masm32\include\user32.inc
       include \masm32\include\kernel32.inc
       include \masm32\include\gdi32.inc
+      include \masm32\macros\macros.asm
       
       includelib \masm32\lib\user32.lib
       includelib \masm32\lib\kernel32.lib
@@ -22,21 +23,21 @@
           lbl:
         ENDM
 
-      m2m MACRO M1, M2
-        push M2
-        pop  M1
-      ENDM
-      
-      return MACRO arg
-        mov eax, arg
-        ret
-      ENDM
-
 ; #########################################################################
 
         WinMain PROTO :DWORD,:DWORD,:DWORD,:DWORD
         WndProc PROTO :DWORD,:DWORD,:DWORD,:DWORD
         TopXY PROTO   :DWORD,:DWORD
+
+        BORDER_SIZE equ 9
+
+        WINDOW_W equ 550
+        WINDOW_H equ 800
+
+        COLUMN_SIZE equ 50
+        COLUMN_COUNT equ 11
+
+        SPRITESET equ 1
 
 ; #########################################################################
 
@@ -45,15 +46,10 @@
     CommandLine   dd 0
     hWnd          dd 0
     hInstance     dd 0
-
-    header_format db "Valor Hex e : %d , %d",0
-    buffer        db 256 dup(?) 
     
 .data?
-    txt         DB  ?
-    val1  	DWORD ?
-    val2  	DWORD ?
     position POINT<>
+    spriteSet dd ?
 
 ; #########################################################################
 
@@ -65,17 +61,35 @@
         invoke GetCommandLine        ; provides the command line address
         mov CommandLine, eax
 
-        invoke WinMain,hInstance,NULL,CommandLine,SW_SHOWDEFAULT
+        invoke WinMain, hInstance, NULL, CommandLine, SW_SHOWDEFAULT
         
-        invoke ExitProcess,eax       ; cleanup & return to operating system
+        invoke ExitProcess, eax       ; cleanup & return to operating system
 
 ; #########################################################################
+
+BuildRect proc, x :DWORD, y :DWORD, w :DWORD, h :DWORD, hdc :HDC, brush :HBRUSH
+    LOCAL rectangle :RECT
+
+    mov eax, x
+    mov rectangle.left, eax
+    add eax, w
+    mov rectangle.right, eax
+    
+    mov eax, y
+    mov rectangle.top, eax
+    add eax, h
+    mov rectangle.bottom, eax
+    
+    invoke FillRect, hdc, addr rectangle, brush
+    ret
+BuildRect endp
 
 WinMain proc hInst     :DWORD,
              hPrevInst :DWORD,
              CmdLine   :DWORD,
              CmdShow   :DWORD
 
+    LOCAL wndcls :WNDCLASSA
     LOCAL wc   :WNDCLASSEX
     LOCAL msg  :MSG
 
@@ -86,7 +100,6 @@ WinMain proc hInst     :DWORD,
 
     szText szClassName, "Class"
 
-    ; Fill WNDCLASSEX structure with required variables
     mov wc.cbSize,         sizeof WNDCLASSEX
     mov wc.style,          CS_HREDRAW or CS_VREDRAW \
                             or CS_BYTEALIGNWINDOW
@@ -94,52 +107,49 @@ WinMain proc hInst     :DWORD,
     mov wc.cbClsExtra,     NULL
     mov wc.cbWndExtra,     NULL
     m2m wc.hInstance,      hInst               ; instance handle
-    mov wc.hbrBackground,  COLOR_BTNFACE+1     ; system color
+    mov wc.hbrBackground,  COLOR_BTNFACE       ; system color
     mov wc.lpszMenuName,   NULL
     mov wc.lpszClassName,  offset szClassName  ; window class name
-        invoke LoadIcon,hInst,500    ; icon ID   ; resource icon
+    invoke LoadIcon, hInst, 500    ; icon ID   ; resource icon
     mov wc.hIcon,          eax
-        invoke LoadCursor,NULL,IDC_ARROW         ; system cursor
+    invoke LoadCursor,NULL,IDC_ARROW         ; system cursor
     mov wc.hCursor,        eax
     mov wc.hIconSm,        0
 
-    invoke RegisterClassEx, ADDR wc     ; register the window class
+    invoke RegisterClassEx, addr wc     ; register the window class
 
     ; Centre window at following size
-    mov Wwd, 500
-    mov Wht, 350
+    mov Wwd, WINDOW_W + BORDER_SIZE
+    mov Wht, WINDOW_H
 
-    invoke GetSystemMetrics,SM_CXSCREEN ; get screen width in pixels
-    invoke TopXY,Wwd,eax
+    invoke GetSystemMetrics, SM_CXSCREEN ; get screen width in pixels
+    invoke TopXY, Wwd, eax
     mov Wtx, eax
 
     invoke GetSystemMetrics,SM_CYSCREEN ; get screen height in pixels
-    invoke TopXY,Wht,eax
+    invoke TopXY, Wht, eax
     mov Wty, eax
 
     ; Create the main application window
-    invoke CreateWindowEx,WS_EX_OVERLAPPEDWINDOW,
-                            ADDR szClassName,
-                            ADDR szDisplayName,
-                            WS_OVERLAPPEDWINDOW,
-                            Wtx,Wty,Wwd,Wht,
-                            NULL,NULL,
-                            hInst,NULL
+    invoke CreateWindowEx, WS_EX_OVERLAPPEDWINDOW,
+                           addr szClassName,
+                           addr szDisplayName,
+                           WS_SYSMENU,
+                           Wtx, Wty, Wwd, Wht,
+                           NULL, NULL,
+                           hInst, NULL
 
     mov   hWnd,eax  ; copy return value into handle DWORD
 
-    invoke LoadMenu,hInst,600                 ; load resource menu
-    invoke SetMenu,hWnd,eax                   ; set it to main window
-
-    invoke ShowWindow,hWnd,SW_SHOWNORMAL      ; display the window
-    invoke UpdateWindow,hWnd                  ; update the display
+    invoke ShowWindow, hWnd, SW_SHOWNORMAL      ; display the window
+    invoke UpdateWindow, hWnd                  ; update the display
 
     StartLoop:
-      invoke GetMessage,ADDR msg,NULL,0,0         ; get each message
+      invoke GetMessage, addr msg, NULL, 0, 0         ; get each message
       cmp eax, 0                                  ; exit if GetMessage()
       je ExitLoop                                 ; returns zero
-      invoke TranslateMessage, ADDR msg           ; translate it
-      invoke DispatchMessage,  ADDR msg           ; send it to message proc
+      invoke TranslateMessage, addr msg           ; translate it
+      invoke DispatchMessage,  addr msg           ; send it to message proc
       jmp StartLoop
     ExitLoop:
 
@@ -154,18 +164,52 @@ WndProc proc hWin   :DWORD,
              wParam :DWORD,
              lParam :DWORD
 
-  LOCAL hDC    :DWORD
-    LOCAL Ps     :PAINTSTRUCT
+    LOCAL hdc :DWORD
+    LOCAL hMemDC :HDC
+    LOCAL Ps  :PAINTSTRUCT
+    LOCAL brush :HBRUSH
 
-    .if uMsg == WM_COMMAND
-    .elseif uMsg == WM_LBUTTONDOWN
-    .elseif uMsg == WM_LBUTTONUP
+    .if uMsg == WM_KEYDOWN
+        .if wParam == VK_LEFT && position.x != 0
+            sub position.x, COLUMN_SIZE
+        .elseif wParam == VK_RIGHT && position.x != WINDOW_W - COLUMN_SIZE
+            add position.x, COLUMN_SIZE
+        .endif
+
+        invoke InvalidateRect, hWnd, NULL, FALSE
+        return 0
+
     .elseif uMsg == WM_PAINT
+
+        invoke BeginPaint, hWin, addr Ps
+        mov hdc, eax
+
+        invoke BuildRect, 0, 0, WINDOW_W, WINDOW_H, hdc, 2
+
+        invoke CreateCompatibleDC, hdc
+        mov hMemDC, eax
+
+        invoke SelectObject, hMemDC, spriteSet
+        invoke BitBlt, hdc, position.x, position.y, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
+
+        invoke DeleteDC, hMemDC
+
+        invoke EndPaint, hWin, addr Ps
+        return  0
+
     .elseif uMsg == WM_CREATE
-    .elseif uMsg == WM_CLOSE
+
+        invoke LoadBitmap, hInstance, SPRITESET
+        mov spriteSet, eax
+
+        mov position.x, COLUMN_SIZE * (COLUMN_COUNT / 2)
+        mov position.y, WINDOW_H - 100
+
     .elseif uMsg == WM_DESTROY
+
         invoke PostQuitMessage, NULL
         return 0 
+
     .endif
 
     invoke DefWindowProc, hWin, uMsg, wParam, lParam
