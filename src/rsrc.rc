@@ -1,0 +1,3 @@
+#define SPRITE 1
+
+SPRITE BITMAP "image.bmp"
