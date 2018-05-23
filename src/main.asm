@@ -53,7 +53,6 @@
     hInstance     dd 0
     
 .data?
-    txtinput DWORD ?
     invaders DWORD 22 dup(?)
     posAux POINT<>
     position POINT<>
@@ -63,18 +62,15 @@
 
 .code
     start:
-        mov txtinput, input("Waiting for input... ")
-        print txtinput
+        invoke GetModuleHandle, NULL ; provides the instance handle
+        mov hInstance, eax
 
-        ;invoke GetModuleHandle, NULL ; provides the instance handle
-        ;mov hInstance, eax
+        invoke GetCommandLine        ; provides the command line address
+        mov CommandLine, eax
 
-        ;invoke GetCommandLine        ; provides the command line address
-        ;mov CommandLine, eax
-
-        ;invoke WinMain, hInstance, NULL, CommandLine, SW_SHOWDEFAULT
+        invoke WinMain, hInstance, NULL, CommandLine, SW_SHOWDEFAULT
         
-        ;invoke ExitProcess, eax       ; cleanup & return to operating system
+        invoke ExitProcess, eax       ; cleanup & return to operating system
 
 ; #########################################################################
 
@@ -150,7 +146,7 @@ WinMain proc hInst     :DWORD,
                            NULL, NULL,
                            hInst, NULL
 
-    mov   hWnd,eax  ; copy return value into handle DWORD
+    mov   hWnd, eax  ; copy return value into handle DWORD
 
     invoke ShowWindow, hWnd, SW_SHOWNORMAL     ; display the window
     invoke UpdateWindow, hWnd                  ; update the display
@@ -204,28 +200,34 @@ WndProc proc hWin   :DWORD,
 
         ; Draw the invaders
         mov esi, 0
-        mov cx, 0
+        mov ecx, 0
         fory_draw:
-            cmp cx, INVADERS_ROWS - 1
+            cmp ecx, INVADERS_ROWS
             jge end_fory_draw
 
-            mov bx, 0
+            mov ebx, 0
             forx_draw:
-                cmp bx, COLUMN_COUNT - 1
+                cmp ebx, COLUMN_COUNT
                 jge end_forx_draw
 
-                mov eax, invaders[esi]
-                ;imul eax, 50
-                invoke BitBlt, hdc, eax, 0, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 50, 0, MERGECOPY
+                mov edx, invaders[esi * 4]
+                imul edx, 50
 
-                inc bx
+                push ecx
+                imul ecx, 50
+                invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 50, 0, MERGECOPY
+                pop ecx
+
+                inc ebx
                 inc esi
                 jmp forx_draw
             end_forx_draw:
 
-            inc cx
+            inc ecx
             jmp fory_draw
         end_fory_draw:
+
+        invoke SelectObject, hMemDC, spriteSet
 
         ; Draw the player
         invoke BitBlt, hdc, position.x, position.y, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
@@ -236,25 +238,25 @@ WndProc proc hWin   :DWORD,
 
     .elseif uMsg == WM_CREATE
 
-        mov edi, 0
-        mov cl, 0
+        mov esi, 0
+        mov al, 0
         fory:
-            cmp cl, INVADERS_ROWS - 1
+            cmp al, INVADERS_ROWS
             jge end_fory
 
-            mov eax, 0
+            mov edx, 0
             forx:
-                cmp eax, COLUMN_COUNT - 1
+                cmp edx, COLUMN_COUNT
                 jge end_forx
 
-                mov invaders[edi], eax
+                mov invaders[esi * 4], edx
 
-                inc eax
-                inc edi
+                inc edx
+                inc esi
                 jmp forx
             end_forx:
 
-            inc cl
+            inc al
             jmp fory
         end_fory:
 
@@ -277,7 +279,7 @@ WndProc endp
 
 ; ########################################################################
 
-TopXY proc wDim:DWORD, sDim:DWORD
+TopXY proc wDim :DWORD, sDim :DWORD
 
     shr sDim, 1      ; divide screen dimension by 2
     shr wDim, 1      ; divide window dimension by 2
