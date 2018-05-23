@@ -9,10 +9,12 @@
       include \masm32\include\kernel32.inc
       include \masm32\include\gdi32.inc
       include \masm32\macros\macros.asm
-      
+      include \masm32\include\masm32.inc
+
       includelib \masm32\lib\user32.lib
       includelib \masm32\lib\kernel32.lib
       includelib \masm32\lib\gdi32.lib
+      includelib \masm32\lib\masm32.lib
       
 ; #########################################################################
 
@@ -37,6 +39,9 @@
         COLUMN_SIZE equ 50
         COLUMN_COUNT equ 11
 
+        INVADERS_COUNT equ 22
+        INVADERS_ROWS equ 2
+
         SPRITESET equ 1
 
 ; #########################################################################
@@ -48,6 +53,9 @@
     hInstance     dd 0
     
 .data?
+    txtinput DWORD ?
+    invaders DWORD 22 dup(?)
+    posAux POINT<>
     position POINT<>
     spriteSet dd ?
 
@@ -55,15 +63,18 @@
 
 .code
     start:
-        invoke GetModuleHandle, NULL ; provides the instance handle
-        mov hInstance, eax
+        mov txtinput, input("Waiting for input... ")
+        print txtinput
 
-        invoke GetCommandLine        ; provides the command line address
-        mov CommandLine, eax
+        ;invoke GetModuleHandle, NULL ; provides the instance handle
+        ;mov hInstance, eax
 
-        invoke WinMain, hInstance, NULL, CommandLine, SW_SHOWDEFAULT
+        ;invoke GetCommandLine        ; provides the command line address
+        ;mov CommandLine, eax
+
+        ;invoke WinMain, hInstance, NULL, CommandLine, SW_SHOWDEFAULT
         
-        invoke ExitProcess, eax       ; cleanup & return to operating system
+        ;invoke ExitProcess, eax       ; cleanup & return to operating system
 
 ; #########################################################################
 
@@ -141,11 +152,11 @@ WinMain proc hInst     :DWORD,
 
     mov   hWnd,eax  ; copy return value into handle DWORD
 
-    invoke ShowWindow, hWnd, SW_SHOWNORMAL      ; display the window
+    invoke ShowWindow, hWnd, SW_SHOWNORMAL     ; display the window
     invoke UpdateWindow, hWnd                  ; update the display
 
     StartLoop:
-      invoke GetMessage, addr msg, NULL, 0, 0         ; get each message
+      invoke GetMessage, addr msg, NULL, 0, 0     ; get each message
       cmp eax, 0                                  ; exit if GetMessage()
       je ExitLoop                                 ; returns zero
       invoke TranslateMessage, addr msg           ; translate it
@@ -190,19 +201,67 @@ WndProc proc hWin   :DWORD,
         mov hMemDC, eax
 
         invoke SelectObject, hMemDC, spriteSet
+
+        ; Draw the invaders
+        mov esi, 0
+        mov cx, 0
+        fory_draw:
+            cmp cx, INVADERS_ROWS - 1
+            jge end_fory_draw
+
+            mov bx, 0
+            forx_draw:
+                cmp bx, COLUMN_COUNT - 1
+                jge end_forx_draw
+
+                mov eax, invaders[esi]
+                ;imul eax, 50
+                invoke BitBlt, hdc, eax, 0, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 50, 0, MERGECOPY
+
+                inc bx
+                inc esi
+                jmp forx_draw
+            end_forx_draw:
+
+            inc cx
+            jmp fory_draw
+        end_fory_draw:
+
+        ; Draw the player
         invoke BitBlt, hdc, position.x, position.y, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
 
         invoke DeleteDC, hMemDC
-
         invoke EndPaint, hWin, addr Ps
         return  0
 
     .elseif uMsg == WM_CREATE
 
+        mov edi, 0
+        mov cl, 0
+        fory:
+            cmp cl, INVADERS_ROWS - 1
+            jge end_fory
+
+            mov eax, 0
+            forx:
+                cmp eax, COLUMN_COUNT - 1
+                jge end_forx
+
+                mov invaders[edi], eax
+
+                inc eax
+                inc edi
+                jmp forx
+            end_forx:
+
+            inc cl
+            jmp fory
+        end_fory:
+
         invoke LoadBitmap, hInstance, SPRITESET
         mov spriteSet, eax
 
-        mov position.x, COLUMN_SIZE * (COLUMN_COUNT / 2)
+        mov position.x, (COLUMN_COUNT / 2) * COLUMN_SIZE
         mov position.y, WINDOW_H - 100
 
     .elseif uMsg == WM_DESTROY
