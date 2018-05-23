@@ -1,3 +1,2 @@
-#define SPRITE 1
-
-SPRITE BITMAP "image.bmp"
+1 BITMAP "player.bmp"
+2 BITMAP "invaders.bmp"
