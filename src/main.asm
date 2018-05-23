@@ -39,8 +39,8 @@
         COLUMN_SIZE equ 50
         COLUMN_COUNT equ 11
 
-        INVADERS_COUNT equ 22
-        INVADERS_ROWS equ 2
+        INVADERS_COUNT equ 55
+        INVADERS_ROWS equ 5
 
         SPRITESET equ 1
 
@@ -53,7 +53,7 @@
     hInstance     dd 0
     
 .data?
-    invaders DWORD 22 dup(?)
+    invaders DWORD 55 dup(?)
     posAux POINT<>
     position POINT<>
     spriteSet dd ?
