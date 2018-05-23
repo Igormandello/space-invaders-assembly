@@ -30,6 +30,7 @@
         WinMain PROTO :DWORD,:DWORD,:DWORD,:DWORD
         WndProc PROTO :DWORD,:DWORD,:DWORD,:DWORD
         TopXY PROTO   :DWORD,:DWORD
+        Animation PROTO
 
         BORDER_SIZE equ 9
 
@@ -42,7 +43,8 @@
         INVADERS_COUNT equ 55
         INVADERS_ROWS equ 5
 
-        SPRITESET equ 1
+        PLAYER_SPRITE equ 1
+        INVADERS_SPRITESET equ 2
 
 ; #########################################################################
 
@@ -51,17 +53,24 @@
     CommandLine   dd 0
     hWnd          dd 0
     hInstance     dd 0
+    actual        dd 0
     
 .data?
     invaders DWORD 55 dup(?)
-    posAux POINT<>
     position POINT<>
-    spriteSet dd ?
+
+    invaders_spriteset dd ?
+    player_sprite dd ?
+
+    dwThreadId dd ?
 
 ; #########################################################################
 
 .code
     start:
+        ;invoke CreateThread, 0, 0, offset Animation, 12345678h, 0, offset dwThreadId
+        invoke CreateThread, 0, 0, offset Animation, 0, 0, 0
+
         invoke GetModuleHandle, NULL ; provides the instance handle
         mov hInstance, eax
 
@@ -191,12 +200,13 @@ WndProc proc hWin   :DWORD,
         invoke BeginPaint, hWin, addr Ps
         mov hdc, eax
 
+        ; Clear the screen
         invoke BuildRect, 0, 0, WINDOW_W, WINDOW_H, hdc, 2
 
         invoke CreateCompatibleDC, hdc
         mov hMemDC, eax
 
-        invoke SelectObject, hMemDC, spriteSet
+        invoke SelectObject, hMemDC, invaders_spriteset
 
         ; Draw the invaders
         mov esi, 0
@@ -213,10 +223,22 @@ WndProc proc hWin   :DWORD,
                 mov edx, invaders[esi * 4]
                 imul edx, 50
 
+                push eax
+                mov eax, ecx
+                imul eax, 100
+
                 push ecx
                 imul ecx, 50
-                invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 50, 0, MERGECOPY
+
+                ; Draw the invaders based on actual state
+                .if actual == 1
+                    add eax, 50
+                .endif
+
+                invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, eax, 0, MERGECOPY
+
                 pop ecx
+                pop eax
 
                 inc ebx
                 inc esi
@@ -227,9 +249,8 @@ WndProc proc hWin   :DWORD,
             jmp fory_draw
         end_fory_draw:
 
-        invoke SelectObject, hMemDC, spriteSet
-
         ; Draw the player
+        invoke SelectObject, hMemDC, player_sprite
         invoke BitBlt, hdc, position.x, position.y, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
 
         invoke DeleteDC, hMemDC
@@ -249,6 +270,7 @@ WndProc proc hWin   :DWORD,
                 cmp edx, COLUMN_COUNT
                 jge end_forx
 
+                ; Invaders array stores the invaders's x position
                 mov invaders[esi * 4], edx
 
                 inc edx
@@ -260,9 +282,14 @@ WndProc proc hWin   :DWORD,
             jmp fory
         end_fory:
 
-        invoke LoadBitmap, hInstance, SPRITESET
-        mov spriteSet, eax
+        ; Loads the sprite resources
+        invoke LoadBitmap, hInstance, PLAYER_SPRITE
+        mov player_sprite, eax
 
+        invoke LoadBitmap, hInstance, INVADERS_SPRITESET
+        mov invaders_spriteset, eax
+
+        ; Initializes the player position
         mov position.x, (COLUMN_COUNT / 2) * COLUMN_SIZE
         mov position.y, WINDOW_H - 100
 
@@ -289,5 +316,27 @@ TopXY proc wDim :DWORD, sDim :DWORD
     return sDim
 
 TopXY endp
+
+; ########################################################################
+
+Animation proc
+
+    LOCAL t :DWORD
+
+    ; 500ms timer
+    animate:
+        invoke GetTickCount
+        mov t, eax
+        add t, 500
+
+        .while eax < t
+          invoke GetTickCount
+        .endw
+
+        xor actual, 1
+        invoke InvalidateRect, hWnd, NULL, FALSE
+        jmp animate
+
+Animation endp
 
 end start
