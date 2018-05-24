@@ -15,22 +15,14 @@
       includelib \masm32\lib\kernel32.lib
       includelib \masm32\lib\gdi32.lib
       includelib \masm32\lib\masm32.lib
-      
-; #########################################################################
-
-      szText MACRO Name, Text:VARARG
-        LOCAL lbl
-          jmp lbl
-            Name db Text,0
-          lbl:
-        ENDM
 
 ; #########################################################################
 
-        WinMain PROTO :DWORD,:DWORD,:DWORD,:DWORD
-        WndProc PROTO :DWORD,:DWORD,:DWORD,:DWORD
-        TopXY PROTO   :DWORD,:DWORD
+        WinMain PROTO :DWORD, :DWORD, :DWORD, :DWORD
+        WndProc PROTO :DWORD, :DWORD, :DWORD, :DWORD
+        TopXY PROTO   :DWORD, :DWORD
         Animation PROTO
+        Frame PROTO
 
         BORDER_SIZE equ 9
 
@@ -43,33 +35,46 @@
         INVADERS_COUNT equ 55
         INVADERS_ROWS equ 5
 
-        PLAYER_SPRITE equ 1
-        INVADERS_SPRITESET equ 2
+        ICON equ 1
+        PLAYER_SPRITESET equ 2
+        INVADERS_SPRITESET equ 3
+
+        SHOT_HEIGHT equ 10
+        SHOT_SPEED equ 5
 
 ; #########################################################################
 
 .data
+    ; Handlers and window variables
     szDisplayName db "Space Invaders", 0
     CommandLine   dd 0
     hWnd          dd 0
     hInstance     dd 0
-    actual        dd 0
+
+    ; Game Variables
+    sprites_state dd 0
+
+    shot_exists db 0
+    shot_x dd 0
+    shot_y dd 0
+
+    player_x dd 0
+    player_y dd 0
     
 .data?
+    ; Position variables
     invaders DWORD 55 dup(?)
-    position POINT<>
 
+    ; Sprites variables
     invaders_spriteset dd ?
-    player_sprite dd ?
-
-    dwThreadId dd ?
+    player_spriteset dd ?
 
 ; #########################################################################
 
 .code
     start:
-        ;invoke CreateThread, 0, 0, offset Animation, 12345678h, 0, offset dwThreadId
         invoke CreateThread, 0, 0, offset Animation, 0, 0, 0
+        invoke CreateThread, 0, 0, offset Frame, 0, 0, 0
 
         invoke GetModuleHandle, NULL ; provides the instance handle
         mov hInstance, eax
@@ -84,6 +89,7 @@
 ; #########################################################################
 
 BuildRect proc, x :DWORD, y :DWORD, w :DWORD, h :DWORD, hdc :HDC, brush :HBRUSH
+
     LOCAL rectangle :RECT
 
     mov eax, x
@@ -98,6 +104,7 @@ BuildRect proc, x :DWORD, y :DWORD, w :DWORD, h :DWORD, hdc :HDC, brush :HBRUSH
     
     invoke FillRect, hdc, addr rectangle, brush
     ret
+
 BuildRect endp
 
 WinMain proc hInst     :DWORD,
@@ -126,11 +133,11 @@ WinMain proc hInst     :DWORD,
     mov wc.hbrBackground,  COLOR_BTNFACE       ; system color
     mov wc.lpszMenuName,   NULL
     mov wc.lpszClassName,  offset szClassName  ; window class name
-    invoke LoadIcon, hInst, 500    ; icon ID   ; resource icon
-    mov wc.hIcon,          eax
+    invoke LoadIcon, hInst, ICON
+    m2m wc.hIcon,          eax
+    m2m wc.hIconSm,        eax
     invoke LoadCursor,NULL,IDC_ARROW         ; system cursor
     mov wc.hCursor,        eax
-    mov wc.hIconSm,        0
 
     invoke RegisterClassEx, addr wc     ; register the window class
 
@@ -186,13 +193,25 @@ WndProc proc hWin   :DWORD,
     LOCAL brush :HBRUSH
 
     .if uMsg == WM_KEYDOWN
-        .if wParam == VK_LEFT && position.x != 0
-            sub position.x, COLUMN_SIZE
-        .elseif wParam == VK_RIGHT && position.x != WINDOW_W - COLUMN_SIZE
-            add position.x, COLUMN_SIZE
+        .if wParam == VK_LEFT && player_x != 0
+            dec player_x
+            invoke InvalidateRect, hWnd, NULL, FALSE
+        .elseif wParam == VK_RIGHT && player_x != COLUMN_COUNT - 1
+            inc player_x
+            invoke InvalidateRect, hWnd, NULL, FALSE
+        .elseif wParam == VK_SPACE && shot_exists == 0
+            mov ebx, player_y
+            sub ebx, SHOT_HEIGHT
+            mov shot_y, ebx
+
+            mov ebx, player_x
+            mov shot_x, ebx
+
+            mov shot_exists, 1
+
+            invoke InvalidateRect, hWnd, NULL, FALSE
         .endif
 
-        invoke InvalidateRect, hWnd, NULL, FALSE
         return 0
 
     .elseif uMsg == WM_PAINT
@@ -221,18 +240,21 @@ WndProc proc hWin   :DWORD,
                 jge end_forx_draw
 
                 mov edx, invaders[esi * 4]
+                cmp edx, -1
+                je  continue
+
                 imul edx, 50
 
                 push eax
                 mov eax, ecx
-                imul eax, 100
+                imul eax, COLUMN_SIZE * 2
 
                 push ecx
-                imul ecx, 50
+                imul ecx, COLUMN_SIZE
 
                 ; Draw the invaders based on actual state
-                .if actual == 1
-                    add eax, 50
+                .if sprites_state == 1
+                    add eax, COLUMN_SIZE
                 .endif
 
                 invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, eax, 0, MERGECOPY
@@ -240,18 +262,27 @@ WndProc proc hWin   :DWORD,
                 pop ecx
                 pop eax
 
-                inc ebx
-                inc esi
-                jmp forx_draw
+                continue:
+                    inc ebx
+                    inc esi
+                    jmp forx_draw
             end_forx_draw:
 
             inc ecx
             jmp fory_draw
         end_fory_draw:
 
-        ; Draw the player
-        invoke SelectObject, hMemDC, player_sprite
-        invoke BitBlt, hdc, position.x, position.y, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
+        ; Draw the shot and player
+        invoke SelectObject, hMemDC, player_spriteset
+        .if shot_exists == 1
+            mov ebx, shot_x
+            imul ebx, COLUMN_SIZE
+            invoke BitBlt, hdc, ebx, shot_y, COLUMN_SIZE, SHOT_HEIGHT, hMemDC, COLUMN_SIZE, 0, MERGECOPY
+        .endif
+
+        mov ebx, player_x
+        imul ebx, COLUMN_SIZE
+        invoke BitBlt, hdc, ebx, player_y, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
 
         invoke DeleteDC, hMemDC
         invoke EndPaint, hWin, addr Ps
@@ -283,15 +314,15 @@ WndProc proc hWin   :DWORD,
         end_fory:
 
         ; Loads the sprite resources
-        invoke LoadBitmap, hInstance, PLAYER_SPRITE
-        mov player_sprite, eax
+        invoke LoadBitmap, hInstance, PLAYER_SPRITESET
+        mov player_spriteset, eax
 
         invoke LoadBitmap, hInstance, INVADERS_SPRITESET
         mov invaders_spriteset, eax
 
         ; Initializes the player position
-        mov position.x, (COLUMN_COUNT / 2) * COLUMN_SIZE
-        mov position.y, WINDOW_H - 100
+        mov player_x, COLUMN_COUNT / 2
+        mov player_y, WINDOW_H - 100
 
     .elseif uMsg == WM_DESTROY
 
@@ -330,13 +361,86 @@ Animation proc
         add t, 500
 
         .while eax < t
-          invoke GetTickCount
+            invoke GetTickCount
         .endw
 
-        xor actual, 1
+        ; Alternates between 0 and 1
+        xor sprites_state, 1
+
         invoke InvalidateRect, hWnd, NULL, FALSE
         jmp animate
 
 Animation endp
+
+; ########################################################################
+
+Frame proc
+
+    LOCAL t :DWORD
+
+    ; 60fps timer
+    frame:
+        invoke GetTickCount
+        mov t, eax
+        add t, 16
+
+        .while eax < t
+            invoke GetTickCount
+        .endw
+
+        cmp shot_exists, 0
+        je frame
+
+        ; Discover the index of actual invader
+        mov edx, INVADERS_ROWS
+        imul edx, COLUMN_COUNT
+
+        mov ebx, COLUMN_COUNT
+        sub ebx, shot_x
+        
+        ; Inverse for to check from the last row to the first if the shot hit some invader
+        sub edx, ebx
+
+        ; Stores the actual row
+        mov ebx, INVADERS_ROWS
+        dec ebx
+        check:
+            cmp edx, 0
+            jl  end_check
+
+            ; If the invader equals -1, the invader is dead
+            mov eax, invaders[edx * 4]
+            cmp eax, -1
+            je  continue
+
+            ; Otherwise, check if the shot hit it
+            mov ecx, ebx
+            imul ecx, COLUMN_SIZE
+            add ecx, COLUMN_SIZE
+
+            ; If the shot is below the invader, there is no reason to keep checking
+            cmp shot_y, ecx
+            jg  end_check
+
+            mov shot_exists, 0
+            mov invaders[edx * 4], -1
+
+            continue:
+                sub edx, COLUMN_COUNT
+                dec ebx
+                jmp check
+        end_check:
+
+        sub shot_y, SHOT_SPEED
+        invoke InvalidateRect, hWnd, NULL, FALSE
+
+        cmp shot_y, -SHOT_HEIGHT
+        jg  frame
+
+        mov shot_exists, 0
+        
+        jmp frame
+
+Frame endp
 
 end start
