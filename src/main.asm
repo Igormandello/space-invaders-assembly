@@ -88,24 +88,26 @@
 
 ; #########################################################################
 
-BuildRect proc, x :DWORD, y :DWORD, w :DWORD, h :DWORD, hdc :HDC, brush :HBRUSH
+Clear proc, hdc :HDC, brush :HBRUSH
 
     LOCAL rectangle :RECT
 
-    mov eax, x
+    mov eax, 0
     mov rectangle.left, eax
-    add eax, w
+    add eax, WINDOW_W
     mov rectangle.right, eax
     
-    mov eax, y
+    mov eax, 0
     mov rectangle.top, eax
-    add eax, h
+    add eax, WINDOW_H
     mov rectangle.bottom, eax
     
     invoke FillRect, hdc, addr rectangle, brush
     ret
 
-BuildRect endp
+Clear endp
+
+; #########################################################################
 
 WinMain proc hInst     :DWORD,
              hPrevInst :DWORD,
@@ -191,15 +193,36 @@ WndProc proc hWin   :DWORD,
     LOCAL hMemDC :HDC
     LOCAL Ps  :PAINTSTRUCT
     LOCAL brush :HBRUSH
+    LOCAL region :RECT
 
     .if uMsg == WM_KEYDOWN
-        .if wParam == VK_LEFT && player_x != 0
-            dec player_x
-            invoke InvalidateRect, hWnd, NULL, FALSE
-        .elseif wParam == VK_RIGHT && player_x != COLUMN_COUNT - 1
-            inc player_x
-            invoke InvalidateRect, hWnd, NULL, FALSE
+        .if wParam == VK_LEFT || wParam == VK_RIGHT
+            mov eax, player_x
+            dec eax
+            imul eax, COLUMN_SIZE
+            mov region.left, eax
+
+            mov ebx, COLUMN_SIZE
+            imul ebx, 3
+            add eax, ebx
+            mov region.right, eax
+            
+            mov eax, player_y
+            mov region.top, eax
+            add eax, COLUMN_SIZE
+            mov region.bottom, eax
+            
+            .if wParam == VK_LEFT && player_x != 0
+                dec player_x
+                sub region.right, COLUMN_SIZE
+            .elseif wParam == VK_RIGHT && player_x != COLUMN_COUNT - 1
+                inc player_x
+                add region.left, COLUMN_SIZE
+            .endif
+
+            invoke InvalidateRect, hWnd, addr region, FALSE
         .elseif wParam == VK_SPACE && shot_exists == 0
+            ; Shot start position
             mov ebx, player_y
             sub ebx, SHOT_HEIGHT
             mov shot_y, ebx
@@ -209,7 +232,20 @@ WndProc proc hWin   :DWORD,
 
             mov shot_exists, 1
 
-            invoke InvalidateRect, hWnd, NULL, FALSE
+            ; Area to invalidate
+            mov eax, shot_x
+            imul eax, COLUMN_SIZE
+            mov region.left, eax
+
+            add eax, COLUMN_SIZE
+            mov region.right, eax
+            
+            mov eax, shot_y
+            mov region.top, eax
+            add eax, SHOT_HEIGHT
+            mov region.bottom, eax
+
+            invoke InvalidateRect, hWnd, addr region, FALSE
         .endif
 
         return 0
@@ -220,7 +256,7 @@ WndProc proc hWin   :DWORD,
         mov hdc, eax
 
         ; Clear the screen
-        invoke BuildRect, 0, 0, WINDOW_W, WINDOW_H, hdc, 2
+        invoke Clear, hdc, 2
 
         invoke CreateCompatibleDC, hdc
         mov hMemDC, eax
@@ -377,6 +413,7 @@ Animation endp
 Frame proc
 
     LOCAL t :DWORD
+    LOCAL region :RECT
 
     ; 60fps timer
     frame:
@@ -425,6 +462,10 @@ Frame proc
             mov shot_exists, 0
             mov invaders[edx * 4], -1
 
+            ; When the shot hit a invader, the check is canceled
+            invoke InvalidateRect, hWnd, NULL, FALSE
+            jmp frame
+
             continue:
                 sub edx, COLUMN_COUNT
                 dec ebx
@@ -432,7 +473,21 @@ Frame proc
         end_check:
 
         sub shot_y, SHOT_SPEED
-        invoke InvalidateRect, hWnd, NULL, FALSE
+
+        ; Only invalidates the shot area
+        mov eax, shot_x
+        imul eax, COLUMN_SIZE
+        mov region.left, eax
+
+        add eax, COLUMN_SIZE
+        mov region.right, eax
+        
+        mov eax, shot_y
+        mov region.top, eax
+        add eax, SHOT_HEIGHT
+        add eax, SHOT_SPEED
+        mov region.bottom, eax
+        invoke InvalidateRect, hWnd, addr region, FALSE
 
         cmp shot_y, -SHOT_HEIGHT
         jg  frame
