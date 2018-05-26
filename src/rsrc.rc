@@ -1,3 +1,3 @@
-1 ICON "icon.ico"
-2 BITMAP "player.bmp"
-3 BITMAP "invaders.bmp"
+1 ICON "../imgs/icon.ico"
+2 BITMAP "../imgs/player.bmp"
+3 BITMAP "../imgs/invaders.bmp"
