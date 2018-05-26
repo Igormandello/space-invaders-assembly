@@ -15,6 +15,8 @@
       includelib \masm32\lib\kernel32.lib
       includelib \masm32\lib\gdi32.lib
       includelib \masm32\lib\masm32.lib
+      include \masm32\include\winmm.inc
+      includelib \masm32\lib\winmm.lib
 
 ; #########################################################################
 
@@ -51,15 +53,18 @@
     hWnd          dd 0
     hInstance     dd 0
 
+    ; Sounds
+    bgMusic   db "../sounds/bg.wav", 0
+
     ; Game Variables
-    sprites_state dd 0
+    spritesState dd 0
 
-    shot_exists db 0
-    shot_x dd 0
-    shot_y dd 0
+    shotExists db 0
+    shotX dd 0
+    shotY dd 0
 
-    player_x dd 0
-    player_y dd 0
+    playerX dd 0
+    playerY dd 0
     
 .data?
     ; Position variables
@@ -197,7 +202,7 @@ WndProc proc hWin   :DWORD,
 
     .if uMsg == WM_KEYDOWN
         .if wParam == VK_LEFT || wParam == VK_RIGHT
-            mov eax, player_x
+            mov eax, playerX
             dec eax
             imul eax, COLUMN_SIZE
             mov region.left, eax
@@ -207,40 +212,40 @@ WndProc proc hWin   :DWORD,
             add eax, ebx
             mov region.right, eax
             
-            mov eax, player_y
+            mov eax, playerY
             mov region.top, eax
             add eax, COLUMN_SIZE
             mov region.bottom, eax
             
-            .if wParam == VK_LEFT && player_x != 0
-                dec player_x
+            .if wParam == VK_LEFT && playerX != 0
+                dec playerX
                 sub region.right, COLUMN_SIZE
-            .elseif wParam == VK_RIGHT && player_x != COLUMN_COUNT - 1
-                inc player_x
+            .elseif wParam == VK_RIGHT && playerX != COLUMN_COUNT - 1
+                inc playerX
                 add region.left, COLUMN_SIZE
             .endif
 
             invoke InvalidateRect, hWnd, addr region, FALSE
-        .elseif wParam == VK_SPACE && shot_exists == 0
+        .elseif wParam == VK_SPACE && shotExists == 0
             ; Shot start position
-            mov ebx, player_y
+            mov ebx, playerY
             sub ebx, SHOT_HEIGHT
-            mov shot_y, ebx
+            mov shotY, ebx
 
-            mov ebx, player_x
-            mov shot_x, ebx
+            mov ebx, playerX
+            mov shotX, ebx
 
-            mov shot_exists, 1
+            mov shotExists, 1
 
             ; Area to invalidate
-            mov eax, shot_x
+            mov eax, shotX
             imul eax, COLUMN_SIZE
             mov region.left, eax
 
             add eax, COLUMN_SIZE
             mov region.right, eax
             
-            mov eax, shot_y
+            mov eax, shotY
             mov region.top, eax
             add eax, SHOT_HEIGHT
             mov region.bottom, eax
@@ -289,7 +294,7 @@ WndProc proc hWin   :DWORD,
                 imul ecx, COLUMN_SIZE
 
                 ; Draw the invaders based on actual state
-                .if sprites_state == 1
+                .if spritesState == 1
                     add eax, COLUMN_SIZE
                 .endif
 
@@ -310,15 +315,15 @@ WndProc proc hWin   :DWORD,
 
         ; Draw the shot and player
         invoke SelectObject, hMemDC, player_spriteset
-        .if shot_exists == 1
-            mov ebx, shot_x
+        .if shotExists == 1
+            mov ebx, shotX
             imul ebx, COLUMN_SIZE
-            invoke BitBlt, hdc, ebx, shot_y, COLUMN_SIZE, SHOT_HEIGHT, hMemDC, COLUMN_SIZE, 0, MERGECOPY
+            invoke BitBlt, hdc, ebx, shotY, COLUMN_SIZE, SHOT_HEIGHT, hMemDC, COLUMN_SIZE, 0, MERGECOPY
         .endif
 
-        mov ebx, player_x
+        mov ebx, playerX
         imul ebx, COLUMN_SIZE
-        invoke BitBlt, hdc, ebx, player_y, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
+        invoke BitBlt, hdc, ebx, playerY, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
 
         invoke DeleteDC, hMemDC
         invoke EndPaint, hWin, addr Ps
@@ -357,8 +362,14 @@ WndProc proc hWin   :DWORD,
         mov invaders_spriteset, eax
 
         ; Initializes the player position
-        mov player_x, COLUMN_COUNT / 2
-        mov player_y, WINDOW_H - 100
+        mov playerX, COLUMN_COUNT / 2
+        mov playerY, WINDOW_H - 100
+
+        ; Game's background music
+        mov eax, SND_FILENAME
+        or eax, SND_LOOP
+        or eax, SND_ASYNC
+        invoke PlaySound, addr bgMusic, 0, eax
 
     .elseif uMsg == WM_DESTROY
 
@@ -401,7 +412,7 @@ Animation proc
         .endw
 
         ; Alternates between 0 and 1
-        xor sprites_state, 1
+        xor spritesState, 1
 
         invoke InvalidateRect, hWnd, NULL, FALSE
         jmp animate
@@ -425,7 +436,7 @@ Frame proc
             invoke GetTickCount
         .endw
 
-        cmp shot_exists, 0
+        cmp shotExists, 0
         je frame
 
         ; Discover the index of actual invader
@@ -433,7 +444,7 @@ Frame proc
         imul edx, COLUMN_COUNT
 
         mov ebx, COLUMN_COUNT
-        sub ebx, shot_x
+        sub ebx, shotX
         
         ; Inverse for to check from the last row to the first if the shot hit some invader
         sub edx, ebx
@@ -456,10 +467,10 @@ Frame proc
             add ecx, COLUMN_SIZE
 
             ; If the shot is below the invader, there is no reason to keep checking
-            cmp shot_y, ecx
+            cmp shotY, ecx
             jg  end_check
 
-            mov shot_exists, 0
+            mov shotExists, 0
             mov invaders[edx * 4], -1
 
             ; When the shot hit a invader, the check is canceled
@@ -472,27 +483,27 @@ Frame proc
                 jmp check
         end_check:
 
-        sub shot_y, SHOT_SPEED
+        sub shotY, SHOT_SPEED
 
         ; Only invalidates the shot area
-        mov eax, shot_x
+        mov eax, shotX
         imul eax, COLUMN_SIZE
         mov region.left, eax
 
         add eax, COLUMN_SIZE
         mov region.right, eax
         
-        mov eax, shot_y
+        mov eax, shotY
         mov region.top, eax
         add eax, SHOT_HEIGHT
         add eax, SHOT_SPEED
         mov region.bottom, eax
         invoke InvalidateRect, hWnd, addr region, FALSE
 
-        cmp shot_y, -SHOT_HEIGHT
+        cmp shotY, -SHOT_HEIGHT
         jg  frame
 
-        mov shot_exists, 0
+        mov shotExists, 0
         
         jmp frame
 
