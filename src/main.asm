@@ -25,6 +25,7 @@
         TopXY PROTO   :DWORD, :DWORD
         Animation PROTO
         Frame PROTO
+        SetUp PROTO
 
         BORDER_SIZE equ 9
 
@@ -39,11 +40,13 @@
 
         SHOT_HEIGHT equ 10
         SHOT_SPEED equ 5
-        APPROACH_RATE equ 20
+        APPROACH_RATE equ 14
 
         ICON equ 1
-        playerSpriteset equ 2
-        invadersSpriteset equ 3
+        PLAYER_SPRITESET equ 2
+        INVADERS_SPRITESET equ 3
+        INITIAL_SCREEN equ 4
+        END_SCREEN equ 5
 
 ; #########################################################################
 
@@ -57,11 +60,10 @@
     ; Sounds
     bgMusic        db "../sounds/bg.wav", 0
     explosionSound db "../sounds/explosion.wav", 0
-    shotSound      db "../sounds/shot.wav", 0
-    hitSound       db "../sounds/hit.wav", 0
 
     ; Pagination variables
-    gameRunning db 1
+    startMenu db 1
+    gameRunning db 0
 
     ; Game variables
     actualRow dd 0
@@ -81,6 +83,8 @@
     ; Sprites variables
     invadersSpriteset dd ?
     playerSpriteset dd ?
+    initialScreen dd ?
+    endScreen dd ?
 
 ; #########################################################################
 
@@ -209,58 +213,66 @@ WndProc proc hWin   :DWORD,
     LOCAL region :RECT
 
     .if uMsg == WM_KEYDOWN
-        .if wParam == VK_LEFT || wParam == VK_RIGHT
-            mov eax, playerX
-            dec eax
-            imul eax, COLUMN_SIZE
-            mov region.left, eax
 
-            mov ebx, COLUMN_SIZE
-            imul ebx, 3
-            add eax, ebx
-            mov region.right, eax
-            
-            mov eax, playerY
-            mov region.top, eax
-            add eax, COLUMN_SIZE
-            mov region.bottom, eax
-            
-            .if wParam == VK_LEFT && playerX != 0
-                dec playerX
-                sub region.right, COLUMN_SIZE
-            .elseif wParam == VK_RIGHT && playerX != COLUMN_COUNT - 1
-                inc playerX
-                add region.left, COLUMN_SIZE
+        .if gameRunning == 0 && wParam == VK_RETURN
+            invoke SetUp
+
+            mov startMenu, 0
+            mov gameRunning, 1
+        .else
+            .if wParam == VK_LEFT || wParam == VK_RIGHT
+                mov eax, playerX
+                dec eax
+                imul eax, COLUMN_SIZE
+                mov region.left, eax
+
+                mov ebx, COLUMN_SIZE
+                imul ebx, 3
+                add eax, ebx
+                mov region.right, eax
+                
+                mov eax, playerY
+                mov region.top, eax
+                add eax, COLUMN_SIZE
+                mov region.bottom, eax
+                
+                .if wParam == VK_LEFT && playerX != 0
+                    dec playerX
+                    sub region.right, COLUMN_SIZE
+                .elseif wParam == VK_RIGHT && playerX != COLUMN_COUNT - 1
+                    inc playerX
+                    add region.left, COLUMN_SIZE
+                .endif
+
+                invoke InvalidateRect, hWnd, addr region, FALSE
+            .elseif wParam == VK_SPACE && shotExists == 0
+                ; Shot start position
+                mov ebx, playerY
+                sub ebx, SHOT_HEIGHT
+                mov shotY, ebx
+
+                mov ebx, playerX
+                mov shotX, ebx
+
+                mov shotExists, 1
+
+                ; Area to invalidate
+                mov eax, shotX
+                imul eax, COLUMN_SIZE
+                mov region.left, eax
+
+                add eax, COLUMN_SIZE
+                mov region.right, eax
+                
+                mov eax, shotY
+                mov region.top, eax
+                add eax, SHOT_HEIGHT
+                mov region.bottom, eax
+
+                invoke InvalidateRect, hWnd, addr region, FALSE
             .endif
-
-            invoke InvalidateRect, hWnd, addr region, FALSE
-        .elseif wParam == VK_SPACE && shotExists == 0
-            ; Shot start position
-            mov ebx, playerY
-            sub ebx, SHOT_HEIGHT
-            mov shotY, ebx
-
-            mov ebx, playerX
-            mov shotX, ebx
-
-            mov shotExists, 1
-
-            ; Area to invalidate
-            mov eax, shotX
-            imul eax, COLUMN_SIZE
-            mov region.left, eax
-
-            add eax, COLUMN_SIZE
-            mov region.right, eax
-            
-            mov eax, shotY
-            mov region.top, eax
-            add eax, SHOT_HEIGHT
-            mov region.bottom, eax
-
-            invoke InvalidateRect, hWnd, addr region, FALSE
         .endif
-
+        
         return 0
 
     .elseif uMsg == WM_PAINT
@@ -268,123 +280,112 @@ WndProc proc hWin   :DWORD,
         invoke BeginPaint, hWin, addr Ps
         mov hdc, eax
 
-        .if gameRunning == 1
-            ; Clear the screen
-            invoke Clear, hdc, 2
+        ; Clear the screen
+        invoke Clear, hdc, 2
 
-            invoke CreateCompatibleDC, hdc
-            mov hMemDC, eax
+        invoke CreateCompatibleDC, hdc
+        mov hMemDC, eax
 
-            invoke SelectObject, hMemDC, invadersSpriteset
+        .if startMenu == 1
+            invoke SelectObject, hMemDC, initialScreen
 
-            ; Draw the invaders
-            mov esi, 0
-            mov ecx, 0
-            fory_draw:
-                cmp ecx, INVADERS_ROWS
-                jge end_fory_draw
+            ; Draw the initial screen
+            mov eax, spritesState
+            imul eax, WINDOW_W
+            invoke BitBlt, hdc, 0, 0, WINDOW_W, WINDOW_H, hMemDC, eax, 0, MERGECOPY
+        .else
+            .if gameRunning == 1
+                invoke SelectObject, hMemDC, invadersSpriteset
 
-                mov ebx, 0
-                forx_draw:
-                    cmp ebx, COLUMN_COUNT
-                    jge end_forx_draw
+                ; Draw the invaders
+                mov esi, 0
+                mov ecx, 0
+                fory_draw:
+                    cmp ecx, INVADERS_ROWS
+                    jge end_fory_draw
 
-                    ; edx represents the actual x
-                    mov edx, invaders[esi * 4]
-                    cmp edx, -1
-                    je  continue
+                    mov ebx, 0
+                    forx_draw:
+                        cmp ebx, COLUMN_COUNT
+                        jge end_forx_draw
 
-                    imul edx, 50
+                        ; edx represents the actual x
+                        mov edx, invaders[esi * 4]
+                        cmp edx, -1
+                        je  continue
 
-                    ; eax represents the actual sprite being used
-                    push eax
-                    mov eax, ecx
-                    imul eax, COLUMN_SIZE * 2
+                        imul edx, 50
 
-                    ; ecx represents the actual y
-                    push ecx
-                    add ecx, actualRow
-                    imul ecx, COLUMN_SIZE
+                        ; eax represents the actual sprite being used
+                        push eax
+                        mov eax, ecx
+                        imul eax, COLUMN_SIZE * 2
 
-                    ; Draw the invaders based on actual state
-                    .if spritesState == 1
-                        add eax, COLUMN_SIZE
-                    .endif
+                        ; ecx represents the actual y
+                        push ecx
+                        add ecx, actualRow
+                        imul ecx, COLUMN_SIZE
 
-                    invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, eax, 0, MERGECOPY
+                        ; Draw the invaders based on actual state
+                        .if spritesState == 1
+                            add eax, COLUMN_SIZE
+                        .endif
 
-                    pop ecx
-                    pop eax
+                        invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, eax, 0, MERGECOPY
 
-                    continue:
-                        inc ebx
-                        inc esi
-                        jmp forx_draw
-                end_forx_draw:
+                        pop ecx
+                        pop eax
 
-                inc ecx
-                jmp fory_draw
-            end_fory_draw:
+                        continue:
+                            inc ebx
+                            inc esi
+                            jmp forx_draw
+                    end_forx_draw:
 
-            ; Draw the shot and player
-            invoke SelectObject, hMemDC, playerSpriteset
-            .if shotExists == 1
-                mov ebx, shotX
+                    inc ecx
+                    jmp fory_draw
+                end_fory_draw:
+
+                ; Draw the shot and player
+                invoke SelectObject, hMemDC, playerSpriteset
+                .if shotExists == 1
+                    mov ebx, shotX
+                    imul ebx, COLUMN_SIZE
+                    invoke BitBlt, hdc, ebx, shotY, COLUMN_SIZE, SHOT_HEIGHT, hMemDC, COLUMN_SIZE, 0, MERGECOPY
+                .endif
+
+                mov ebx, playerX
                 imul ebx, COLUMN_SIZE
-                invoke BitBlt, hdc, ebx, shotY, COLUMN_SIZE, SHOT_HEIGHT, hMemDC, COLUMN_SIZE, 0, MERGECOPY
+                invoke BitBlt, hdc, ebx, playerY, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
+            .else
+                ; Draw the game over screen
+                invoke SelectObject, hMemDC, endScreen
+
+                mov eax, spritesState
+                imul eax, WINDOW_W
+                invoke BitBlt, hdc, 0, 0, WINDOW_W, WINDOW_H, hMemDC, eax, 0, MERGECOPY
             .endif
-
-            mov ebx, playerX
-            imul ebx, COLUMN_SIZE
-            invoke BitBlt, hdc, ebx, playerY, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
-
-            invoke DeleteDC, hMemDC
         .endif
+
+        invoke DeleteDC, hMemDC
 
         invoke EndPaint, hWin, addr Ps
         return  0
 
     .elseif uMsg == WM_CREATE
 
-        mov esi, 0
-        mov al, 0
-        fory:
-            cmp al, INVADERS_ROWS
-            jge end_fory
-
-            mov edx, 0
-            forx:
-                cmp edx, COLUMN_COUNT
-                jge end_forx
-
-                ; Invaders array stores the invaders's x position
-                mov invaders[esi * 4], edx
-
-                inc edx
-                inc esi
-                jmp forx
-            end_forx:
-
-            inc al
-            jmp fory
-        end_fory:
-
         ; Loads the sprite resources
-        invoke LoadBitmap, hInstance, playerSpriteset
+        invoke LoadBitmap, hInstance, PLAYER_SPRITESET
         mov playerSpriteset, eax
 
-        invoke LoadBitmap, hInstance, invadersSpriteset
+        invoke LoadBitmap, hInstance, INVADERS_SPRITESET
         mov invadersSpriteset, eax
 
-        ; Initializes the player position
-        mov playerX, COLUMN_COUNT / 2
-        mov playerY, WINDOW_H - 99
+        invoke LoadBitmap, hInstance, INITIAL_SCREEN
+        mov initialScreen, eax
 
-        ; Game's background music
-        mov eax, SND_FILENAME
-        or eax, SND_LOOP
-        or eax, SND_ASYNC
-        invoke PlaySound, addr bgMusic, 0, eax
+        invoke LoadBitmap, hInstance, END_SCREEN
+        mov endScreen, eax
 
     .elseif uMsg == WM_DESTROY
 
@@ -409,6 +410,49 @@ TopXY proc wDim :DWORD, sDim :DWORD
     return sDim
 
 TopXY endp
+
+; ########################################################################
+
+SetUp proc
+
+    mov actualRow, 0
+
+    mov esi, 0
+    mov al, 0
+    fory:
+        cmp al, INVADERS_ROWS
+        jge end_fory
+
+        mov edx, 0
+        forx:
+            cmp edx, COLUMN_COUNT
+            jge end_forx
+
+            ; Invaders array stores the invaders's x position
+            mov invaders[esi * 4], edx
+
+            inc edx
+            inc esi
+            jmp forx
+        end_forx:
+
+        inc al
+        jmp fory
+    end_fory:
+
+    ; Initializes the player position
+    mov playerX, COLUMN_COUNT / 2
+    mov playerY, WINDOW_H - 99
+
+    ; Game's background music
+    mov eax, SND_FILENAME
+    or eax, SND_LOOP
+    or eax, SND_ASYNC
+    invoke PlaySound, addr bgMusic, 0, eax
+
+    ret
+
+SetUp endp
 
 ; ########################################################################
 

@@ -1,3 +1,5 @@
 1 ICON "../imgs/icon.ico"
 2 BITMAP "../imgs/player.bmp"
 3 BITMAP "../imgs/invaders.bmp"
+4 BITMAP "../imgs/initialScreen.bmp"
+5 BITMAP "../imgs/endScreen.bmp"
