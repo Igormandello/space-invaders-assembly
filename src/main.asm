@@ -37,12 +37,13 @@
         INVADERS_COUNT equ 55
         INVADERS_ROWS equ 5
 
-        ICON equ 1
-        PLAYER_SPRITESET equ 2
-        INVADERS_SPRITESET equ 3
-
         SHOT_HEIGHT equ 10
         SHOT_SPEED equ 5
+        APPROACH_RATE equ 20
+
+        ICON equ 1
+        playerSpriteset equ 2
+        invadersSpriteset equ 3
 
 ; #########################################################################
 
@@ -54,9 +55,16 @@
     hInstance     dd 0
 
     ; Sounds
-    bgMusic   db "../sounds/bg.wav", 0
+    bgMusic        db "../sounds/bg.wav", 0
+    explosionSound db "../sounds/explosion.wav", 0
+    shotSound      db "../sounds/shot.wav", 0
+    hitSound       db "../sounds/hit.wav", 0
 
-    ; Game Variables
+    ; Pagination variables
+    gameRunning db 1
+
+    ; Game variables
+    actualRow dd 0
     spritesState dd 0
 
     shotExists db 0
@@ -71,8 +79,8 @@
     invaders DWORD 55 dup(?)
 
     ; Sprites variables
-    invaders_spriteset dd ?
-    player_spriteset dd ?
+    invadersSpriteset dd ?
+    playerSpriteset dd ?
 
 ; #########################################################################
 
@@ -260,72 +268,79 @@ WndProc proc hWin   :DWORD,
         invoke BeginPaint, hWin, addr Ps
         mov hdc, eax
 
-        ; Clear the screen
-        invoke Clear, hdc, 2
+        .if gameRunning == 1
+            ; Clear the screen
+            invoke Clear, hdc, 2
 
-        invoke CreateCompatibleDC, hdc
-        mov hMemDC, eax
+            invoke CreateCompatibleDC, hdc
+            mov hMemDC, eax
 
-        invoke SelectObject, hMemDC, invaders_spriteset
+            invoke SelectObject, hMemDC, invadersSpriteset
 
-        ; Draw the invaders
-        mov esi, 0
-        mov ecx, 0
-        fory_draw:
-            cmp ecx, INVADERS_ROWS
-            jge end_fory_draw
+            ; Draw the invaders
+            mov esi, 0
+            mov ecx, 0
+            fory_draw:
+                cmp ecx, INVADERS_ROWS
+                jge end_fory_draw
 
-            mov ebx, 0
-            forx_draw:
-                cmp ebx, COLUMN_COUNT
-                jge end_forx_draw
+                mov ebx, 0
+                forx_draw:
+                    cmp ebx, COLUMN_COUNT
+                    jge end_forx_draw
 
-                mov edx, invaders[esi * 4]
-                cmp edx, -1
-                je  continue
+                    ; edx represents the actual x
+                    mov edx, invaders[esi * 4]
+                    cmp edx, -1
+                    je  continue
 
-                imul edx, 50
+                    imul edx, 50
 
-                push eax
-                mov eax, ecx
-                imul eax, COLUMN_SIZE * 2
+                    ; eax represents the actual sprite being used
+                    push eax
+                    mov eax, ecx
+                    imul eax, COLUMN_SIZE * 2
 
-                push ecx
-                imul ecx, COLUMN_SIZE
+                    ; ecx represents the actual y
+                    push ecx
+                    add ecx, actualRow
+                    imul ecx, COLUMN_SIZE
 
-                ; Draw the invaders based on actual state
-                .if spritesState == 1
-                    add eax, COLUMN_SIZE
-                .endif
+                    ; Draw the invaders based on actual state
+                    .if spritesState == 1
+                        add eax, COLUMN_SIZE
+                    .endif
 
-                invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, eax, 0, MERGECOPY
+                    invoke BitBlt, hdc, edx, ecx, COLUMN_SIZE, COLUMN_SIZE, hMemDC, eax, 0, MERGECOPY
 
-                pop ecx
-                pop eax
+                    pop ecx
+                    pop eax
 
-                continue:
-                    inc ebx
-                    inc esi
-                    jmp forx_draw
-            end_forx_draw:
+                    continue:
+                        inc ebx
+                        inc esi
+                        jmp forx_draw
+                end_forx_draw:
 
-            inc ecx
-            jmp fory_draw
-        end_fory_draw:
+                inc ecx
+                jmp fory_draw
+            end_fory_draw:
 
-        ; Draw the shot and player
-        invoke SelectObject, hMemDC, player_spriteset
-        .if shotExists == 1
-            mov ebx, shotX
+            ; Draw the shot and player
+            invoke SelectObject, hMemDC, playerSpriteset
+            .if shotExists == 1
+                mov ebx, shotX
+                imul ebx, COLUMN_SIZE
+                invoke BitBlt, hdc, ebx, shotY, COLUMN_SIZE, SHOT_HEIGHT, hMemDC, COLUMN_SIZE, 0, MERGECOPY
+            .endif
+
+            mov ebx, playerX
             imul ebx, COLUMN_SIZE
-            invoke BitBlt, hdc, ebx, shotY, COLUMN_SIZE, SHOT_HEIGHT, hMemDC, COLUMN_SIZE, 0, MERGECOPY
+            invoke BitBlt, hdc, ebx, playerY, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
+
+            invoke DeleteDC, hMemDC
         .endif
 
-        mov ebx, playerX
-        imul ebx, COLUMN_SIZE
-        invoke BitBlt, hdc, ebx, playerY, COLUMN_SIZE, COLUMN_SIZE, hMemDC, 0, 0, MERGECOPY
-
-        invoke DeleteDC, hMemDC
         invoke EndPaint, hWin, addr Ps
         return  0
 
@@ -355,15 +370,15 @@ WndProc proc hWin   :DWORD,
         end_fory:
 
         ; Loads the sprite resources
-        invoke LoadBitmap, hInstance, PLAYER_SPRITESET
-        mov player_spriteset, eax
+        invoke LoadBitmap, hInstance, playerSpriteset
+        mov playerSpriteset, eax
 
-        invoke LoadBitmap, hInstance, INVADERS_SPRITESET
-        mov invaders_spriteset, eax
+        invoke LoadBitmap, hInstance, invadersSpriteset
+        mov invadersSpriteset, eax
 
         ; Initializes the player position
         mov playerX, COLUMN_COUNT / 2
-        mov playerY, WINDOW_H - 100
+        mov playerY, WINDOW_H - 99
 
         ; Game's background music
         mov eax, SND_FILENAME
@@ -400,6 +415,9 @@ TopXY endp
 Animation proc
 
     LOCAL t :DWORD
+    LOCAL count : byte
+
+    mov count, 0
 
     ; 500ms timer
     animate:
@@ -413,6 +431,63 @@ Animation proc
 
         ; Alternates between 0 and 1
         xor spritesState, 1
+
+        .if gameRunning == 1
+            inc count
+
+            .if count == APPROACH_RATE
+                mov count, 0
+                inc actualRow
+
+                ; eax controls the actual line
+                mov eax, INVADERS_ROWS
+                dec eax
+                reached:
+                    cmp eax, 0
+                    jb  end_reached
+
+                    mov ebx, eax
+                    inc ebx
+                    add ebx, actualRow
+                    imul ebx, COLUMN_SIZE
+
+                    ; If the bottom of the actual row reached the player, check the invaders
+                    cmp ebx, playerY
+                    jb  end_reached
+
+                    ; ebx is the first invader of the row
+                    mov ebx, eax
+                    imul ebx, COLUMN_COUNT
+
+                    ; ecx is the first invader of the next row
+                    mov ecx, ebx
+                    add ecx, COLUMN_COUNT
+                    row_check:
+                        ; Check only the actual row
+                        cmp ebx, ecx
+                        jge end_row_check
+
+                        ; If any invader in this row is alive, the player lost the game
+                        mov edx, invaders[ebx * 4]
+                        .if edx != -1
+                            mov gameRunning, 0
+
+                            mov edx, SND_FILENAME
+                            or edx, SND_ASYNC
+                            invoke PlaySound, addr explosionSound, 0, edx
+
+                            jmp end_reached
+                        .endif
+
+                        inc ebx
+                        jmp row_check
+                    end_row_check:
+
+                    dec eax
+                    jmp reached
+                end_reached:
+            .endif
+        .endif
 
         invoke InvalidateRect, hWnd, NULL, FALSE
         jmp animate
@@ -463,6 +538,7 @@ Frame proc
 
             ; Otherwise, check if the shot hit it
             mov ecx, ebx
+            add ecx, actualRow
             imul ecx, COLUMN_SIZE
             add ecx, COLUMN_SIZE
 

@@ -19,6 +19,7 @@ Link /SUBSYSTEM:WINDOWS /OPT:NOREF main.obj ../src/rsrc.obj
 if errorlevel 1 goto errlink
 
 main.exe
+cls
 goto TheEnd
 
 :errlink
