@@ -27,7 +27,11 @@
         Frame PROTO
         SetUp PROTO
 
+        BACKGROUND_COLOR equ 00h
+        TEXT_COLOR equ 0FFFFFFh
+
         BORDER_SIZE equ 9
+        SCORE_TEXT_SIZE equ 100
 
         WINDOW_W equ 550
         WINDOW_H equ 800
@@ -52,7 +56,6 @@
 
 .data
     ; Handlers and window variables
-    szDisplayName db "Space Invaders", 0
     CommandLine   dd 0
     hWnd          dd 0
     hInstance     dd 0
@@ -61,12 +64,16 @@
     bgMusic        db "../sounds/bg.wav", 0
     explosionSound db "../sounds/explosion.wav", 0
 
+    ; Texts
+    szDisplayName db "Space Invaders", 0
+    fontFace db "System", 0
+
     ; Pagination variables
     startMenu db 1
     gameRunning db 0
 
     ; Game variables
-    actualRow dd 0
+    actualRow dd 1
     spritesState dd 0
 
     shotExists db 0
@@ -75,6 +82,13 @@
 
     playerX dd 0
     playerY dd 0
+
+    ; Score variables
+    scoreAux db "SCORE: ", 0
+    scoreText db 6 dup (32), 0
+    score dd 0
+    scoreChanged db 1
+    lineValues dd 4000, 2000, 2000, 1000, 1000
     
 .data?
     ; Position variables
@@ -85,6 +99,9 @@
     playerSpriteset dd ?
     initialScreen dd ?
     endScreen dd ?
+
+    ; Misc
+    textFont HFONT ?
 
 ; #########################################################################
 
@@ -105,7 +122,7 @@
 
 ; #########################################################################
 
-Clear proc, hdc :HDC, brush :HBRUSH
+Clear proc, hdc :HDC
 
     LOCAL rectangle :RECT
 
@@ -119,10 +136,76 @@ Clear proc, hdc :HDC, brush :HBRUSH
     add eax, WINDOW_H
     mov rectangle.bottom, eax
     
-    invoke FillRect, hdc, addr rectangle, brush
+    invoke CreateSolidBrush, BACKGROUND_COLOR
+    invoke FillRect, hdc, addr rectangle, eax
     ret
 
 Clear endp
+
+; #########################################################################
+
+DrawScore proc, hdc :HDC
+
+    LOCAL region :RECT
+
+    ; Recalculates only if the score has changed
+    .if scoreChanged == 1
+        mov eax, score
+        mov ecx, 10
+        xor bx, bx ; count digits
+
+        divide:
+            xor edx, edx        ; high part = 0
+            div ecx             ; eax = edx:eax/ecx, edx = remainder
+            push dx             ; DL is a digit in range [0..9]
+            inc bx              ; count digits
+            test eax, eax       ; EAX is 0?
+            jnz divide          ; no, continue
+
+            ; POP digits from stack in reverse order
+            mov cx, bx          ; number of digits
+            lea si, scoreText   ; DS:SI points to string buffer
+
+        next_digit:
+            pop ax
+            add al, '0'         ; convert to ASCII
+            mov [esi], al        ; write it to the buffer
+            inc si
+            loop next_digit
+
+        mov scoreChanged, 0
+    .endif
+
+    ; Score aux bounds
+    mov region.left, 0
+    mov region.right, WINDOW_W
+    sub region.right, SCORE_TEXT_SIZE
+    mov region.top, 0
+    mov region.bottom, COLUMN_SIZE
+
+    ; Select the font to be used and the foreground and background colors
+    invoke SelectObject, hdc, textFont
+    invoke SetBkColor, hdc, BACKGROUND_COLOR
+    invoke SetTextColor, hdc, TEXT_COLOR
+
+    ; Draw the score aux ("Score: ")
+    mov ebx, DT_RIGHT
+    or ebx, DT_VCENTER
+    or ebx, DT_SINGLELINE
+    invoke DrawText, hdc, addr scoreAux, -1, addr region, ebx
+
+    ; Score text bounds
+    mov region.left, WINDOW_W
+    sub region.left, SCORE_TEXT_SIZE
+    mov region.right, WINDOW_W
+
+    ; Draw the player's score
+    xor ebx, DT_RIGHT
+    invoke DrawText, hdc, addr scoreText, -1, addr region, ebx
+
+    ret
+
+DrawScore endp
 
 ; #########################################################################
 
@@ -220,6 +303,10 @@ WndProc proc hWin   :DWORD,
             mov startMenu, 0
             mov gameRunning, 1
         .else
+            .if gameRunning == 0
+                return 0
+            .endif
+
             .if wParam == VK_LEFT || wParam == VK_RIGHT
                 mov eax, playerX
                 dec eax
@@ -281,7 +368,7 @@ WndProc proc hWin   :DWORD,
         mov hdc, eax
 
         ; Clear the screen
-        invoke Clear, hdc, 2
+        invoke Clear, hdc
 
         invoke CreateCompatibleDC, hdc
         mov hMemDC, eax
@@ -295,9 +382,12 @@ WndProc proc hWin   :DWORD,
             invoke BitBlt, hdc, 0, 0, WINDOW_W, WINDOW_H, hMemDC, eax, 0, MERGECOPY
         .else
             .if gameRunning == 1
-                invoke SelectObject, hMemDC, invadersSpriteset
+
+                invoke DrawScore, hdc
 
                 ; Draw the invaders
+                invoke SelectObject, hMemDC, invadersSpriteset
+
                 mov esi, 0
                 mov ecx, 0
                 fory_draw:
@@ -314,6 +404,7 @@ WndProc proc hWin   :DWORD,
                         cmp edx, -1
                         je  continue
 
+                        mov edx, ebx
                         imul edx, 50
 
                         ; eax represents the actual sprite being used
@@ -364,6 +455,8 @@ WndProc proc hWin   :DWORD,
                 mov eax, spritesState
                 imul eax, WINDOW_W
                 invoke BitBlt, hdc, 0, 0, WINDOW_W, WINDOW_H, hMemDC, eax, 0, MERGECOPY
+
+                invoke DrawScore, hdc
             .endif
         .endif
 
@@ -386,6 +479,10 @@ WndProc proc hWin   :DWORD,
 
         invoke LoadBitmap, hInstance, END_SCREEN
         mov endScreen, eax
+
+        ; Creates the font to draw the score
+        invoke CreateFont, COLUMN_SIZE - 20, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, FF_DONTCARE, addr fontFace
+        mov textFont, eax
 
     .elseif uMsg == WM_DESTROY
 
@@ -415,10 +512,12 @@ TopXY endp
 
 SetUp proc
 
-    mov actualRow, 0
+    mov score, 0
+    mov actualRow, 1
 
     mov esi, 0
     mov al, 0
+    mov edi, 0
     fory:
         cmp al, INVADERS_ROWS
         jge end_fory
@@ -428,14 +527,16 @@ SetUp proc
             cmp edx, COLUMN_COUNT
             jge end_forx
 
-            ; Invaders array stores the invaders's x position
-            mov invaders[esi * 4], edx
+            ; Invaders array stores the invaders's score worth
+            mov ebx, lineValues[edi * 4]
+            mov invaders[esi * 4], ebx
 
             inc edx
             inc esi
             jmp forx
         end_forx:
 
+        inc edi
         inc al
         jmp fory
     end_fory:
@@ -591,7 +692,11 @@ Frame proc
             jg  end_check
 
             mov shotExists, 0
+            mov eax, invaders[edx * 4]
             mov invaders[edx * 4], -1
+
+            add score, eax
+            mov scoreChanged, 1
 
             ; When the shot hit a invader, the check is canceled
             invoke InvalidateRect, hWnd, NULL, FALSE
