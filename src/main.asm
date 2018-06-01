@@ -44,6 +44,7 @@
 
         SHOT_HEIGHT equ 10
         SHOT_SPEED equ 5
+        SHOT_MISSED equ 10000
         APPROACH_RATE equ 14
 
         ICON equ 1
@@ -75,6 +76,7 @@
     ; Game variables
     actualRow dd 1
     spritesState dd 0
+    invadersKilled db 0
 
     shotExists db 0
     shotX dd 0
@@ -150,6 +152,12 @@ DrawScore proc, hdc :HDC
 
     ; Recalculates only if the score has changed
     .if scoreChanged == 1
+        mov eax, 0
+        .while eax < 6
+            mov scoreText[eax], 32
+            inc eax
+        .endw
+
         mov eax, score
         mov ecx, 10
         xor bx, bx ; count digits
@@ -198,6 +206,10 @@ DrawScore proc, hdc :HDC
     mov region.left, WINDOW_W
     sub region.left, SCORE_TEXT_SIZE
     mov region.right, WINDOW_W
+
+    ; Clear the old score
+    invoke CreateSolidBrush, BACKGROUND_COLOR
+    invoke FillRect, hdc, addr region, eax
 
     ; Draw the player's score
     xor ebx, DT_RIGHT
@@ -698,6 +710,11 @@ Frame proc
             add score, eax
             mov scoreChanged, 1
 
+            inc invadersKilled
+            .if invadersKilled == INVADERS_COUNT
+                mov gameRunning, 0
+            .endif
+
             ; When the shot hit a invader, the check is canceled
             invoke InvalidateRect, hWnd, NULL, FALSE
             jmp frame
@@ -728,7 +745,20 @@ Frame proc
         cmp shotY, -SHOT_HEIGHT
         jg  frame
 
+        .if score < SHOT_MISSED
+            mov score, 0
+        .else
+            sub score, SHOT_MISSED
+        .endif
+
+        mov scoreChanged, 1
         mov shotExists, 0
+
+        mov region.top, 0
+        mov region.bottom, COLUMN_SIZE
+        mov region.left, 0
+        mov region.right, WINDOW_W
+        invoke InvalidateRect, hWnd, addr region, FALSE
         
         jmp frame
 
